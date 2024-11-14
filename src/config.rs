@@ -1,3 +1,4 @@
+use clap::{Arg, Command, ValueEnum};
 use std::{
     collections::HashSet,
     env,
@@ -5,8 +6,6 @@ use std::{
     path::PathBuf,
     sync::LazyLock,
 };
-
-use clap::{Arg, Command, ValueEnum};
 
 /// Describes at what point in the compilation process we should exit early.
 ///
@@ -22,6 +21,7 @@ pub enum EarlyExitUpTo {
     CodeGen,
 }
 
+#[derive(Debug, PartialEq, Eq)]
 pub struct ConfigStruct {
     pub use_lsp: bool,
     pub lsp_debug_mode: bool,
@@ -36,9 +36,8 @@ pub struct ConfigStruct {
     pub files: Vec<PathBuf>,
 }
 
-pub fn config() -> &'static ConfigStruct {
-    static CONFIG: LazyLock<ConfigStruct> = LazyLock::new(|| {
-        let matches = Command::new("SUS Compiler")
+fn command_builder() -> Command {
+    Command::new("SUS Compiler")
         .version(env!("CARGO_PKG_VERSION"))
         .author(env!("CARGO_PKG_AUTHORS"))
         .about("The compiler for the SUS Hardware Design Language. This compiler takes in .sus files, and produces equivalent SystemVerilog files")
@@ -84,13 +83,12 @@ pub fn config() -> &'static ConfigStruct {
             .action(clap::ArgAction::Append))
         .arg(Arg::new("standalone")
             .long("standalone")
-            .help("Generate standalone code with all dependencies in one file of the module specified. ")
-            .action(clap::ArgAction::SetTrue))
+            .help("Generate standalone code with all dependencies in one file of the module specified."))
         .arg(Arg::new("upto")
             .long("upto")
             .help("Describes at what point in the compilation process we should exit early. This is mainly to aid in debugging, where incorrect results from flattening/typechecking may lead to errors, which we still wish to see in say the LSP")
             .value_parser(clap::builder::EnumValueParser::<EarlyExitUpTo>::new())
-            .default_value("codegen"))
+            .default_value("code-gen"))
         .arg(Arg::new("nocolor")
             .long("nocolor")
             .help("Disables color printing in the errors of the sus_compiler output")
@@ -110,47 +108,101 @@ pub fn config() -> &'static ConfigStruct {
                     Ok(())
                 }
             }))
-        .get_matches();
+}
 
-        let lsp_port = *matches.get_one("socket").unwrap();
-        let use_lsp = matches.get_flag("use_lsp");
-        let lsp_debug_mode = matches.get_flag("lsp-debug");
+fn parse_args<I, T>(itr: I) -> Result<ConfigStruct, clap::Error>
+where
+    I: IntoIterator<Item = T>,
+    T: Into<OsString> + Clone,
+{
+    let matches = command_builder().try_get_matches_from(itr)?;
+    let lsp_port = *matches.get_one("socket").unwrap();
+    let use_lsp = matches.get_flag("lsp");
+    let lsp_debug_mode = matches.get_flag("lsp-debug");
 
-        let codegen =
-            matches.get_flag("codegen") || matches.get_many::<OsString>("files").is_none();
-        let debug_print_module_contents = matches.get_flag("debug");
-        let debug_print_latency_graph = matches.get_flag("debug-latency");
-        let debug_whitelist = matches
-            .get_many("debug-whitelist")
-            .map(|s| s.cloned().collect());
-        let use_color = !matches.get_flag("nocolor") && !use_lsp;
-        let early_exit = *matches.get_one("upto").unwrap();
-        let codegen_module_and_dependencies_one_file = matches.get_one("standalone").cloned();
-        let file_paths: Vec<_> = match matches.get_many("files".as_ref()) {
-            Some(files) => files
-                .map(|file_path: &OsString| PathBuf::from(file_path))
-                .collect(),
-            None => std::fs::read_dir(".")
-                .unwrap()
-                .map(|file| file.unwrap().path())
-                .filter(|file_path| {
-                    file_path.is_file() && file_path.extension() == Some("sus".as_ref())
-                })
-                .collect(),
-        };
-        ConfigStruct {
-            use_lsp,
-            lsp_debug_mode,
-            lsp_port,
-            codegen,
-            debug_print_module_contents,
-            debug_print_latency_graph,
-            debug_whitelist,
-            codegen_module_and_dependencies_one_file,
-            early_exit,
-            use_color,
-            files: file_paths,
-        }
+    let codegen = matches.get_flag("codegen") || matches.get_many::<OsString>("files").is_none();
+    let debug_print_module_contents = matches.get_flag("debug");
+    let debug_print_latency_graph = matches.get_flag("debug-latency");
+    let debug_whitelist = matches
+        .get_many("debug-whitelist")
+        .map(|s| s.cloned().collect());
+    let use_color = !matches.get_flag("nocolor") && !use_lsp;
+    let early_exit = *matches.get_one("upto").unwrap();
+    let codegen_module_and_dependencies_one_file = matches.get_one("standalone").cloned();
+    let file_paths: Vec<_> = match matches.get_many("files".as_ref()) {
+        Some(files) => files
+            .map(|file_path: &OsString| PathBuf::from(file_path))
+            .collect(),
+        None => std::fs::read_dir(".")
+            .unwrap()
+            .map(|file| file.unwrap().path())
+            .filter(|file_path| {
+                file_path.is_file() && file_path.extension() == Some("sus".as_ref())
+            })
+            .collect(),
+    };
+    Ok(ConfigStruct {
+        use_lsp,
+        lsp_debug_mode,
+        lsp_port,
+        codegen,
+        debug_print_module_contents,
+        debug_print_latency_graph,
+        debug_whitelist,
+        codegen_module_and_dependencies_one_file,
+        early_exit,
+        use_color,
+        files: file_paths,
+    })
+}
+
+pub fn config() -> &'static ConfigStruct {
+    static CONFIG: LazyLock<ConfigStruct> = LazyLock::new(|| {
+        let args: Vec<OsString> = std::env::args_os().collect();
+        parse_args(args.as_slice())
+            .map_err(|err| err.exit())
+            .unwrap()
     });
     &CONFIG
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_args;
+
+    #[test]
+    fn test_socket_invalid_port() {
+        let config = parse_args(&["", "--lsp", "--socket", "1234567890"]);
+        assert!(config.is_err());
+        let err = config.unwrap_err();
+        assert_eq!(err.kind(), clap::error::ErrorKind::ValueValidation);
+    }
+
+    #[test]
+    fn test_socket_require_lsp() {
+        let config = parse_args(&["", "--socket", "1500"]);
+        assert!(config.is_err());
+        let err = config.unwrap_err();
+        assert_eq!(err.kind(), clap::error::ErrorKind::MissingRequiredArgument);
+    }
+
+    #[test]
+    fn test_lsp_debug_require_lsp() {
+        let config = parse_args(&["", "--lsp-debug"]);
+        assert!(config.is_err());
+        let err = config.unwrap_err();
+        assert_eq!(err.kind(), clap::error::ErrorKind::MissingRequiredArgument);
+    }
+
+    #[test]
+    fn test_lsp_no_color() {
+        let config = parse_args(&["", "--lsp"]).unwrap();
+        assert_eq!(config.use_color, false)
+    }
+
+    #[test]
+    fn test_automatic_codegen() {
+        let config = parse_args(&[""]).unwrap();
+        assert_eq!(config.codegen, true)
+    }
 }
