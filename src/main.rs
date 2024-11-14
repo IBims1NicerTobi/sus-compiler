@@ -32,7 +32,7 @@ use std::rc::Rc;
 use prelude::*;
 
 use codegen_fallback::gen_verilog_code;
-use config::{config, parse_args, EarlyExitUpTo};
+use config::{config, EarlyExitUpTo};
 use dev_aid::ariadne_interface::*;
 use flattening::Module;
 use instantiation::InstantiatedModule;
@@ -106,9 +106,10 @@ fn codegen_with_dependencies(linker: &Linker, md: &Module, file_name: &str) {
 }
 
 fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
-    let file_paths = parse_args();
-
     let config = config();
+
+    let file_paths = config.files.clone();
+
 
     if config.use_lsp {
         #[cfg(feature = "lsp")]
