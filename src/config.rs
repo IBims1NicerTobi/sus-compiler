@@ -21,6 +21,12 @@ pub enum EarlyExitUpTo {
     CodeGen,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+pub enum Target {
+    SystemVerilog,
+    VHDL,
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub struct ConfigStruct {
     pub use_lsp: bool,
@@ -34,6 +40,7 @@ pub struct ConfigStruct {
     pub early_exit: EarlyExitUpTo,
     pub use_color: bool,
     pub files: Vec<PathBuf>,
+    pub target: Target,
 }
 
 fn command_builder() -> Command {
@@ -93,6 +100,11 @@ fn command_builder() -> Command {
             .long("nocolor")
             .help("Disables color printing in the errors of the sus_compiler output")
             .action(clap::ArgAction::SetTrue))
+        .arg(Arg::new("target")
+            .long("target")
+            .help("Which HDL to target during codegen")
+            .value_parser(clap::builder::EnumValueParser::<Target>::new())
+            .default_value("system-verilog"))
         .arg(Arg::new("files")
             .action(clap::ArgAction::Append)
             .help(".sus Files")
@@ -120,6 +132,7 @@ where
     let use_lsp = matches.get_flag("lsp");
     let lsp_debug_mode = matches.get_flag("lsp-debug");
 
+    let target = *matches.get_one("target").unwrap();
     let codegen = matches.get_flag("codegen") || matches.get_many::<OsString>("files").is_none();
     let debug_print_module_contents = matches.get_flag("debug");
     let debug_print_latency_graph = matches.get_flag("debug-latency");
@@ -153,6 +166,7 @@ where
         early_exit,
         use_color,
         files: file_paths,
+        target,
     })
 }
 
