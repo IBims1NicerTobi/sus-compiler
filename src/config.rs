@@ -117,7 +117,7 @@ fn command_builder() -> Command {
                 } else if file_path.extension() != Some(OsStr::new("sus")) {
                     Err("Source files must end in .sus")
                 } else {
-                    Ok(())
+                    Ok(file_path)
                 }
             }))
 }
@@ -133,7 +133,7 @@ where
     let lsp_debug_mode = matches.get_flag("lsp-debug");
 
     let target = *matches.get_one("target").unwrap();
-    let codegen = matches.get_flag("codegen") || matches.get_many::<OsString>("files").is_none();
+    let codegen = matches.get_flag("codegen") || matches.get_many::<PathBuf>("files").is_none();
     let debug_print_module_contents = matches.get_flag("debug");
     let debug_print_latency_graph = matches.get_flag("debug-latency");
     let debug_whitelist = matches
@@ -142,10 +142,8 @@ where
     let use_color = !matches.get_flag("nocolor") && !use_lsp;
     let early_exit = *matches.get_one("upto").unwrap();
     let codegen_module_and_dependencies_one_file = matches.get_one("standalone").cloned();
-    let file_paths: Vec<_> = match matches.get_many("files".as_ref()) {
-        Some(files) => files
-            .map(|file_path: &OsString| PathBuf::from(file_path))
-            .collect(),
+    let file_paths: Vec<PathBuf> = match matches.get_many("files") {
+        Some(files) => files.cloned().collect(),
         None => std::fs::read_dir(".")
             .unwrap()
             .map(|file| file.unwrap().path())
